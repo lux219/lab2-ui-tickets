@@ -44,6 +44,8 @@ class TicketGeneratorApp(tk.Tk):
         self.results_store = ResultsStore(RESULTS_FILE)
         self.tickets: dict[int, Ticket] = {}
         self.current_students: list[Student] = []
+        self.nav_buttons: dict[str, tk.Label] = {}
+        self.active_view = "Dashboard"
 
         self.group_var = tk.StringVar()
         self.student_var = tk.StringVar()
@@ -116,15 +118,12 @@ class TicketGeneratorApp(tk.Tk):
 
         self._build_sidebar(root)
 
-        main = ttk.Frame(root, style="App.TFrame", padding=(28, 22, 28, 22))
-        main.grid(row=0, column=1, sticky="nsew")
-        main.columnconfigure(0, weight=1)
-        main.rowconfigure(3, weight=1)
+        self.main = ttk.Frame(root, style="App.TFrame", padding=(28, 22, 28, 22))
+        self.main.grid(row=0, column=1, sticky="nsew")
+        self.main.columnconfigure(0, weight=1)
+        self.main.rowconfigure(3, weight=1)
 
-        self._build_header(main)
-        self._build_metrics(main)
-        self._build_workspace(main)
-        self._build_history(main)
+        self._render_active_view()
 
     def _build_sidebar(self, parent: ttk.Frame) -> None:
         sidebar = ttk.Frame(parent, style="Sidebar.TFrame", padding=(22, 24))
@@ -142,12 +141,11 @@ class TicketGeneratorApp(tk.Tk):
         ).pack(anchor="w", pady=(4, 30))
 
         for item in ("Dashboard", "Students", "Tickets", "Results", "Logs"):
-            color = "#ffffff" if item == "Dashboard" else SIDEBAR_MUTED
-            bg = "#1d293b" if item == "Dashboard" else SIDEBAR_COLOR
-            tk.Label(sidebar, text=item, bg=bg, fg=color, anchor="w", font=("Segoe UI", 10, "bold"), padx=14, pady=10).pack(
-                fill=tk.X,
-                pady=3,
-            )
+            label = tk.Label(sidebar, text=item, anchor="w", font=("Segoe UI", 10, "bold"), padx=14, pady=10, cursor="hand2")
+            label.pack(fill=tk.X, pady=3)
+            label.bind("<Button-1>", lambda _event, view=item: self._switch_view(view))
+            self.nav_buttons[item] = label
+        self._sync_sidebar()
 
         tk.Label(
             sidebar,
@@ -158,22 +156,170 @@ class TicketGeneratorApp(tk.Tk):
             font=("Segoe UI", 9),
         ).pack(side=tk.BOTTOM, anchor="w")
 
-    def _build_header(self, parent: ttk.Frame) -> None:
+    def _render_active_view(self) -> None:
+        for child in self.main.winfo_children():
+            child.destroy()
+
+        if self.active_view == "Dashboard":
+            self._build_header(self.main, "Генератор билетов", "Расширенная панель выдачи билетов с журналом, статистикой и быстрыми действиями.")
+            self._build_metrics(self.main)
+            self._build_workspace(self.main)
+            self._build_history(self.main)
+            self._refresh_dashboard()
+        elif self.active_view == "Students":
+            self._build_header(self.main, "Студенты", "Просмотр групп и студентов из students.xlsx.")
+            self._build_students_view(self.main)
+        elif self.active_view == "Tickets":
+            self._build_header(self.main, "Билеты", "Просмотр корректно распознанных билетов из tickets.docx.")
+            self._build_tickets_view(self.main)
+        elif self.active_view == "Results":
+            self._build_header(self.main, "Журнал результатов", "История всех генераций из results.xlsx.")
+            self._build_results_view(self.main)
+        elif self.active_view == "Logs":
+            self._build_header(self.main, "Логи", "Ошибки парсинга и служебные сообщения приложения.")
+            self._build_logs_view(self.main)
+
+    def _switch_view(self, view: str) -> None:
+        self.active_view = view
+        self._sync_sidebar()
+        self._render_active_view()
+
+    def _sync_sidebar(self) -> None:
+        for view, label in self.nav_buttons.items():
+            active = view == self.active_view
+            label.config(bg="#1d293b" if active else SIDEBAR_COLOR, fg="#ffffff" if active else SIDEBAR_MUTED)
+
+    def _build_header(self, parent: ttk.Frame, title: str, subtitle: str) -> None:
         header = ttk.Frame(parent, style="App.TFrame")
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
 
-        ttk.Label(header, text="Генератор билетов", style="Title.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            header,
-            text="Расширенная панель выдачи билетов с журналом, статистикой и быстрыми действиями.",
-            style="Subtitle.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(header, text=title, style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=subtitle, style="Subtitle.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         actions = ttk.Frame(header, style="App.TFrame")
         actions.grid(row=0, column=1, rowspan=2, sticky="e")
         ttk.Button(actions, text="Обновить данные", style="Ghost.TButton", command=self._reload_sources).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(actions, text="Открыть журнал", style="Ghost.TButton", command=self._open_results_file).pack(side=tk.LEFT)
+
+    def _build_students_view(self, parent: ttk.Frame) -> None:
+        card = ttk.Frame(parent, style="Card.TFrame", padding=22)
+        card.grid(row=1, column=0, sticky="nsew", pady=(24, 0))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+
+        ttk.Label(card, text="Все студенты по группам", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
+        columns = ("group", "last_name", "first_name")
+        table = ttk.Treeview(card, columns=columns, show="headings", style="History.Treeview")
+        table.heading("group", text="Группа")
+        table.heading("last_name", text="Фамилия")
+        table.heading("first_name", text="Имя")
+        table.column("group", width=180)
+        table.column("last_name", width=240)
+        table.column("first_name", width=240)
+        table.grid(row=1, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(card, orient=tk.VERTICAL, command=table.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        table.configure(yscrollcommand=scrollbar.set)
+
+        if self.student_store is None:
+            return
+        for group_name in self.student_store.group_names():
+            students = self.student_store.students_for_group(group_name)
+            if not students:
+                table.insert("", tk.END, values=(group_name, "Нет студентов", ""))
+            for student in students:
+                table.insert("", tk.END, values=(group_name, student.last_name, student.first_name))
+
+    def _build_tickets_view(self, parent: ttk.Frame) -> None:
+        card = ttk.Frame(parent, style="Card.TFrame", padding=22)
+        card.grid(row=1, column=0, sticky="nsew", pady=(24, 0))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+
+        ttk.Label(card, text=f"Корректные билеты: {len(self.tickets)}", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
+        columns = ("number", "q1", "q2", "q3")
+        table = ttk.Treeview(card, columns=columns, show="headings", style="History.Treeview")
+        table.heading("number", text="Билет")
+        table.heading("q1", text="Вопрос 1")
+        table.heading("q2", text="Вопрос 2")
+        table.heading("q3", text="Вопрос 3")
+        table.column("number", width=70, anchor="center")
+        table.column("q1", width=260)
+        table.column("q2", width=260)
+        table.column("q3", width=260)
+        table.grid(row=1, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(card, orient=tk.VERTICAL, command=table.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        table.configure(yscrollcommand=scrollbar.set)
+
+        for number, ticket in sorted(self.tickets.items()):
+            table.insert("", tk.END, values=(number, *ticket.questions))
+
+    def _build_results_view(self, parent: ttk.Frame) -> None:
+        stats = self.results_store.stats()
+        metrics = ttk.Frame(parent, style="App.TFrame")
+        metrics.grid(row=1, column=0, sticky="ew", pady=(24, 18))
+        for column in range(4):
+            metrics.columnconfigure(column, weight=1)
+        values = [
+            (stats.total_generations, "Всего выдач"),
+            (stats.unique_students, "Уникальных студентов"),
+            (stats.repeat_generations, "Повторов"),
+            (stats.top_ticket if stats.top_ticket is not None else "-", "Самый частый билет"),
+        ]
+        for column, (value, title) in enumerate(values):
+            card = ttk.Frame(metrics, style="Card.TFrame", padding=18)
+            card.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 10, 0))
+            ttk.Label(card, text=str(value), style="Metric.TLabel").pack(anchor="w")
+            ttk.Label(card, text=title, style="MetricName.TLabel").pack(anchor="w", pady=(3, 0))
+
+        card = ttk.Frame(parent, style="Card.TFrame", padding=22)
+        card.grid(row=2, column=0, sticky="nsew")
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+        ttk.Label(card, text="Полный журнал", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
+        table = self._create_results_table(card)
+        table.grid(row=1, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(card, orient=tk.VERTICAL, command=table.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        table.configure(yscrollcommand=scrollbar.set)
+        for entry in self.results_store.recent_entries(limit=10_000):
+            table.insert("", tk.END, values=(entry.created_at, entry.group_name, entry.full_name, entry.ticket_number, entry.repeat))
+
+    def _build_logs_view(self, parent: ttk.Frame) -> None:
+        card = ttk.Frame(parent, style="Card.TFrame", padding=22)
+        card.grid(row=1, column=0, sticky="nsew", pady=(24, 0))
+        card.columnconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+        ttk.Label(card, text="app.log", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
+
+        text = tk.Text(card, wrap=tk.WORD, borderwidth=0, font=("Consolas", 10), bg="#f8fafc", fg=TEXT_COLOR)
+        text.grid(row=1, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(card, orient=tk.VERTICAL, command=text.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        text.configure(yscrollcommand=scrollbar.set)
+        if LOG_FILE.exists():
+            content = LOG_FILE.read_text(encoding="utf-8")
+        else:
+            content = "Лог пока пуст. Ошибки парсинга билетов появятся здесь."
+        text.insert("1.0", content)
+        text.configure(state=tk.DISABLED)
+
+    def _create_results_table(self, parent: ttk.Frame) -> ttk.Treeview:
+        columns = ("time", "group", "student", "ticket", "repeat")
+        table = ttk.Treeview(parent, columns=columns, show="headings", style="History.Treeview")
+        table.heading("time", text="Дата и время")
+        table.heading("group", text="Группа")
+        table.heading("student", text="Студент")
+        table.heading("ticket", text="Билет")
+        table.heading("repeat", text="Повтор")
+        table.column("time", width=160, anchor="w")
+        table.column("group", width=100, anchor="w")
+        table.column("student", width=220, anchor="w")
+        table.column("ticket", width=70, anchor="center")
+        table.column("repeat", width=80, anchor="center")
+        return table
 
     def _build_metrics(self, parent: ttk.Frame) -> None:
         self.metric_frame = ttk.Frame(parent, style="App.TFrame")
@@ -317,9 +463,10 @@ class TicketGeneratorApp(tk.Tk):
             return
 
         groups = self.student_store.group_names()
-        self.group_combo.config(state="readonly")
-        self.student_combo.config(state="readonly")
-        self.group_combo["values"] = groups
+        if hasattr(self, "group_combo") and self.group_combo.winfo_exists():
+            self.group_combo.config(state="readonly")
+            self.student_combo.config(state="readonly")
+            self.group_combo["values"] = groups
         self._set_status("Данные загружены", f"Корректных билетов: {len(self.tickets)}. Выберите группу и студента.", PRIMARY_COLOR)
         self._refresh_dashboard()
 
@@ -327,25 +474,31 @@ class TicketGeneratorApp(tk.Tk):
         self.group_var.set("")
         self.student_var.set("")
         self.current_students = []
-        self.group_combo["values"] = []
-        self.student_combo["values"] = []
-        self.student_list.delete(0, tk.END)
-        self.generate_button.config(state=tk.DISABLED)
+        if hasattr(self, "group_combo") and self.group_combo.winfo_exists():
+            self.group_combo["values"] = []
+            self.student_combo["values"] = []
+            self.student_list.delete(0, tk.END)
+            self.generate_button.config(state=tk.DISABLED)
         self._load_sources()
+        self._render_active_view()
 
     def _set_unavailable(self, message: str) -> None:
         self._set_status("Ошибка загрузки", message, ERROR_COLOR)
-        self.group_combo.config(state=tk.DISABLED)
-        self.student_combo.config(state=tk.DISABLED)
-        self.generate_button.config(state=tk.DISABLED)
+        if hasattr(self, "group_combo") and self.group_combo.winfo_exists():
+            self.group_combo.config(state=tk.DISABLED)
+            self.student_combo.config(state=tk.DISABLED)
+            self.generate_button.config(state=tk.DISABLED)
         messagebox.showerror("Ошибка загрузки", message)
 
     def _set_status(self, title: str, message: str, color: str = PRIMARY_COLOR) -> None:
-        self.status_title.config(text=title)
-        self.status_label.config(text=message)
-        self.status_accent.config(bg=color)
+        if hasattr(self, "status_title") and self.status_title.winfo_exists():
+            self.status_title.config(text=title)
+            self.status_label.config(text=message)
+            self.status_accent.config(bg=color)
 
     def _refresh_dashboard(self) -> None:
+        if self.active_view != "Dashboard" or not hasattr(self, "metric_labels"):
+            return
         groups = list(self.group_combo["values"]) if self.group_combo["values"] else []
         stats = self.results_store.stats()
         self.metric_labels["groups"].config(text=str(len(groups)))
