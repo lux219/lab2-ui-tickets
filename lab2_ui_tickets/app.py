@@ -165,6 +165,7 @@ class TicketGeneratorApp(tk.Tk):
             self._build_metrics(self.main)
             self._build_workspace(self.main)
             self._build_history(self.main)
+            self._sync_dashboard_inputs()
             self._refresh_dashboard()
         elif self.active_view == "Students":
             self._build_header(self.main, "Студенты", "Просмотр групп и студентов из students.xlsx.")
@@ -463,10 +464,7 @@ class TicketGeneratorApp(tk.Tk):
             return
 
         groups = self.student_store.group_names()
-        if hasattr(self, "group_combo") and self.group_combo.winfo_exists():
-            self.group_combo.config(state="readonly")
-            self.student_combo.config(state="readonly")
-            self.group_combo["values"] = groups
+        self._sync_dashboard_inputs(groups)
         self._set_status("Данные загружены", f"Корректных билетов: {len(self.tickets)}. Выберите группу и студента.", PRIMARY_COLOR)
         self._refresh_dashboard()
 
@@ -495,6 +493,18 @@ class TicketGeneratorApp(tk.Tk):
             self.status_title.config(text=title)
             self.status_label.config(text=message)
             self.status_accent.config(bg=color)
+
+    def _sync_dashboard_inputs(self, groups: list[str] | None = None) -> None:
+        if self.active_view != "Dashboard" or not hasattr(self, "group_combo") or not self.group_combo.winfo_exists():
+            return
+        if groups is None and self.student_store is not None:
+            groups = self.student_store.group_names()
+        groups = groups or []
+        self.group_combo.config(state="readonly")
+        self.student_combo.config(state="readonly")
+        self.group_combo["values"] = groups
+        if self.group_var.get() in groups:
+            self._on_group_selected()
 
     def _refresh_dashboard(self) -> None:
         if self.active_view != "Dashboard" or not hasattr(self, "metric_labels"):
