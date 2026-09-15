@@ -25,6 +25,18 @@
 ```bash
 pip install -r requirements.txt
 python sample_data.py
+python web_app.py
+```
+
+После запуска веб-версия доступна по адресу:
+
+```text
+http://127.0.0.1:5000
+```
+
+Старая desktop-версия на Tkinter тоже оставлена в проекте:
+
+```bash
 python app.py
 ```
 
